@@ -122,7 +122,7 @@ void d_dx(double** f, int _n, int _m, double _dx)
 
 #pragma region Crank_Nicholson method
 void CHM2_Crank_Nucolson(double **f, double I, double G1, double G2, double alpha, double V, double dt, double dx,
-	int N, int M, double x0, double d,bool nu0=true)
+	int N, int M, double x0, double d, bool nu0 = true)
 {
 	int seed = time(NULL);
 #pragma region mkl
@@ -164,7 +164,7 @@ void CHM2_Crank_Nucolson(double **f, double I, double G1, double G2, double alph
 			index++;
 		}
 		f[N - 1][j + 1] = bet[N - 1] / (1 - al[N - 1]);
-		for (int i = N - 1; i>0; i--)
+		for (int i = N - 1; i > 0; i--)
 		{
 			f[i - 1][j + 1] = al[i] * f[i][j + 1] + bet[i];
 		}
@@ -176,7 +176,7 @@ void CHM2_Crank_Nucolson(double **f, double I, double G1, double G2, double alph
 }
 
 void CHM2_Crank_Nucolson_Prob(double **P, double I, double G1, double G2, double alpha, double V, double dt, double dx,
-	int N, int M, double x0, double d, int NAver, int NTH,int Niter,bool nu0=true)
+	int N, int M, double x0, double d, int NAver, int NTH, int Niter, bool nu0 = true)
 {
 	int Nvect = (int)(NAver / Niter);
 	Niter = (100 < NAver) ? (100) : NAver;
@@ -244,7 +244,7 @@ void CHM2_Crank_Nucolson_Prob(double **P, double I, double G1, double G2, double
 					{
 						P[N - 1][j + 1] += invNaver;
 					}
-					for (int i = N - 1; i>0; i--)
+					for (int i = N - 1; i > 0; i--)
 					{
 						f[i - 1][2] = al[i] * f[i][2] + bet[i];
 						if ((-PI < f[i - 1][2]) && (f[i - 1][2] < PI))
@@ -266,7 +266,7 @@ void CHM2_Crank_Nucolson_Prob(double **P, double I, double G1, double G2, double
 }
 
 void CHM2_Crank_Nucolson_Prob(double *P, double I, double G1, double G2, double alpha, double V, double dt, double dx,
-	int N, int M, double x0, double d, int NAver, int NTH,int Niter)
+	int N, int M, double x0, double d, int NAver, int NTH, int Niter)
 {
 	int Nvect = (int)(NAver / Niter);
 	Niter = (Niter < NAver) ? (Niter) : NAver;
@@ -303,13 +303,13 @@ void CHM2_Crank_Nucolson_Prob(double *P, double I, double G1, double G2, double 
 			for (int s = 0; s < Niter; s++) {
 				for (int i = 0; i < N; i++)
 				{
-					f[i][0] = 0.0;// 4.0*atan(exp((i*dx - x0)*knu));//NU
+					f[i][0] = 4.0*atan(exp((i*dx - x0)*knu));//NU
 
 					if ((-PI < f[i][0]) && (f[i][0] < PI))
 					{
 						P[0] += invNaver;
 					}
-					f[i][1] = 0.0;// 4.0*atan(exp(((i*dx - x0) - V*dt)*knu));//NU
+					f[i][1] = 4.0*atan(exp(((i*dx - x0) - V*dt)*knu));//NU
 					if ((-PI < f[i][1]) && (f[i][1] < PI))
 					{
 						P[1] += invNaver;
@@ -334,7 +334,99 @@ void CHM2_Crank_Nucolson_Prob(double *P, double I, double G1, double G2, double 
 					{
 						P[j + 1] += invNaver;
 					}
-					for (int i = N - 1; i>0; i--)
+					for (int i = N - 1; i > 0; i--)
+					{
+						f[i - 1][2] = al[i] * f[i][2] + bet[i];
+						if ((-PI < f[i - 1][2]) && (f[i - 1][2] < PI))
+						{
+							P[j + 1] += invNaver;
+						}
+						f[i][0] = f[i][1];
+						f[i][1] = f[i][2];
+					}
+					f[0][0] = f[0][1];
+					f[0][1] = f[0][2];
+				}
+			}
+			vslDeleteStream(&stream);
+			Delete(f, N);
+			delete[]r;
+		}
+	}
+}
+
+void CHM2_Crank_Nucolson_Prob_DynamicI(double *P, double v_I, double G1, double G2, double alpha, double V, double dt, double dx,
+	int N, int M, double x0, double d, int NAver, int NTH, int Niter)
+{
+	int Nvect = (int)(NAver / Niter);
+	Niter = (Niter < NAver) ? (Niter) : NAver;
+	for (int l = 0; l < Nvect; l++)
+	{
+		int seed = time(NULL);
+		omp_set_num_threads(NTH);
+#pragma omp parallel shared(P)
+		{
+#pragma region mkl
+			int size_r = (int)(N*M*Niter / NTH) + 1;
+			float *r = new float[size_r];
+			int index = 0;
+			VSLStreamStatePtr stream;
+			vslNewStream(&stream, BRNG, seed + omp_get_thread_num());
+			vsRngGaussian(METHOD, stream, size_r, r, 0.0, 1.0);
+#pragma endregion
+#pragma region koef
+			double ksi = sqrt(2.0*d*alpha / (dt*dx));
+			double Ai = -0.5 / (dx*dx), Ci = -(1.0 / (dt*dt) + 0.5*alpha / dt + 1.0 / (dx*dx)), Bi = -0.5 / (dx*dx), kap = 1.0;
+			double knu = 1.0 / sqrt(1.0 - V*V);
+			double* al, *bet;
+			al = new double[N];
+			bet = new double[N];
+			double psi;
+			double I = 0.0;
+			double t2 = 1.0 / (dt*dt);
+			double x2 = 0.5 / (dx*dx);
+			double k1 = 0.5*alpha / dt;
+			double invNaver = 1.0 / (N*NAver);
+			double **f = NULL;
+			New(f, N, 3);
+#pragma endregion
+#pragma omp for
+			for (int s = 0; s < Niter; s++) {
+				for (int i = 0; i < N; i++)
+				{
+					f[i][0] = 4.0*atan(exp((i*dx - x0)*knu));//NU
+
+					if ((-PI < f[i][0]) && (f[i][0] < PI))
+					{
+						P[0] += invNaver;
+					}
+					f[i][1] = 4.0*atan(exp(((i*dx - x0) - V*dt)*knu));//NU
+					if ((-PI < f[i][1]) && (f[i][1] < PI))
+					{
+						P[1] += invNaver;
+					}
+				}
+				f[0][0] = f[1][0];
+				f[0][1] = f[1][1];
+				f[N - 1][0] = f[N - 2][0];
+				f[N - 1][1] = f[N - 2][1];
+				for (int j = 1; j < M - 1; j++)
+				{
+					al[1] = kap; bet[1] = 0.0;
+					I = v_I*dt*j;
+					for (int i = 1; i < N - 1; i++)
+					{
+						psi = -(ksi*r[index] + I - sin(f[i][1]) + k1*f[i][0] + x2*(f[i - 1][0] - 2.0*f[i][0] + f[i + 1][0]) - t2*(-2.0*f[i][1] + f[i][0]));
+						al[i + 1] = Bi / (Ci - al[i] * Ai);
+						bet[i + 1] = (psi + Ai*bet[i]) / (Ci - al[i] * Ai);
+						index++;
+					}
+					f[N - 1][2] = bet[N - 1] / (1 - al[N - 1]);
+					if ((-PI < f[N - 1][2]) && (f[N - 1][2] < PI))
+					{
+						P[j + 1] += invNaver;
+					}
+					for (int i = N - 1; i > 0; i--)
 					{
 						f[i - 1][2] = al[i] * f[i][2] + bet[i];
 						if ((-PI < f[i - 1][2]) && (f[i - 1][2] < PI))
@@ -405,7 +497,7 @@ void CHM1_explicit_Prob(double **P, double I, double G1, double G2, double alpha
 	int N, int M, double x0, double d, int NAver, int NTH, int Niter)
 {
 	int Nvect = (int)(NAver / Niter);
-	Niter = (100<NAver) ? (100) : NAver;
+	Niter = (100 < NAver) ? (100) : NAver;
 	for (int l = 0; l < Nvect; l++)
 	{
 		int seed = time(NULL);
@@ -500,7 +592,7 @@ void CHM1_explicit_Prob(double *P, double I, double G1, double G2, double alpha,
 {
 	int Niter = 100,
 		Nvect = (int)(NAver / Niter);
-	Niter = (Niter<NAver) ? (Niter) : NAver;
+	Niter = (Niter < NAver) ? (Niter) : NAver;
 	for (int l = 0; l < Nvect; l++)
 	{
 		int seed = time(NULL);
@@ -509,7 +601,7 @@ void CHM1_explicit_Prob(double *P, double I, double G1, double G2, double alpha,
 		{
 #pragma region mkl
 			int size_r = (int)(N*M*Niter / NTH) + 1;
-			cout << size_r<<' ';
+			cout << size_r << ' ';
 			float *r = static_cast<float*>(_mm_malloc(size_r * sizeof(float), 32)); //new float[size_r];
 			if (r == NULL)
 			{
@@ -610,7 +702,7 @@ int main(int argc, char* argv[])
 	double G1 = 0, G2 = 0;
 	double V = 0.0;
 	double d = 0.0;
-	int Naver = 100,Niter=100;
+	int Naver = 100, Niter = 100;
 	string fname = "default.txt";
 #pragma endregion
 
@@ -633,7 +725,7 @@ int main(int argc, char* argv[])
 				cout << endl;
 				while (arg != 0)
 				{
-					cout <<"Current value: "<<argv[arg]<<endl<<"New value: ";
+					cout << "Current value: " << argv[arg] << endl << "New value: ";
 					cin >> argv[arg];
 					cout << endl << "Number any arg: ";
 					cin >> arg;
@@ -686,11 +778,9 @@ int main(int argc, char* argv[])
 	N = (int)((B - A) / dx) + 1;
 	cout << M << ' ' << N << endl;
 
-	//P1 = new double[M];
-
 	//CHM1_explicit(f, I, G1, G2, alpha, V, dt, dx, N, M, x0, d);//f(x,t)
 	//Print(catalog + "/exp_F_" + fname, f, N, M, dx, dt);
-	New(f, N, M);
+	/*New(f, N, M);
 	start = time(NULL);
 	CHM2_Crank_Nucolson(f, I, G1, G2, alpha, V, dt, dx, N, M, x0, d);
 	stop = time(NULL);
@@ -698,40 +788,33 @@ int main(int argc, char* argv[])
 	Print(catalog + "/crn_F_nu0" + fname, f, N, M, dx, dt);
 	CHM2_Crank_Nucolson(f, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, false);
 	Print(catalog + "/crn_F_" + fname, f, N, M, dx, dt);
-	Delete(f, N);
+	Delete(f, N);*/
 	//d_dx(f, N, M, dx);//df(x,t)/dx
 	//Print(catalog + "/crn_dFdx_" + fname, f, N, M, dx, dt);
-	New(P, N, M);
+	/*New(P, N, M);
 	start = time(NULL);
 	CHM2_Crank_Nucolson_Prob(P, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter);
 	stop = time(NULL);
 	worktime2 = stop - start;
 	Print(catalog + "/crn_p_nu0" + fname, P, N, M, dx, dt);
 	New(P, N, M);
-	CHM2_Crank_Nucolson_Prob(P, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter,false);
+	CHM2_Crank_Nucolson_Prob(P, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter, false);
 	Print(catalog + "/crn_p_" + fname, P, N, M, dx, dt);
-	Delete(P, N);
+	Delete(P, N);*/
 	//New(P, N, M);
 	//CHM1_explicit_Prob(P, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter);
 	//Print(catalog + "/exp_p_" + fname, P, N, M, dx, dt);
 	//Delete(P, N);
 
-	/*for (int i = 0; i < M; i++)
-		P1[i] = 0.0;
-	start = time(NULL);
-	CHM2_Crank_Nucolson_Prob(P1, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 1, Niter);
-	stop = time(NULL);
-	Print(catalog + "/crn1_p_" + fname, P1, M, dt);
-	worktime1 = stop - start;
-
+	P1 = new double[M];
 	for (int i = 0; i < M; i++)
 		P1[i] = 0.0;
 	start = time(NULL);
-	CHM2_Crank_Nucolson_Prob(P1, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter);
+	CHM2_Crank_Nucolson_Prob_DynamicI(P1, I, G1, G2, alpha, V, dt, dx, N, M, x0, d, Naver, 2, Niter);
 	stop = time(NULL);
-	worktime2 = stop - start;
-	Print(catalog + "/crn2_p_" + fname, P1, M, dt);
-	delete[]P1;*/
+	Print(catalog + "/crn_p_" + fname, P1, M, dt);
+	worktime1 = stop - start;
+	delete[]P1;
 #pragma endregion
 
 #pragma region info
@@ -741,8 +824,8 @@ int main(int argc, char* argv[])
 	fprintf(out, "Имя файла: %s\n", fname.c_str());
 	fprintf(out, "Границы по координате x : %f %f\nВерхняя граница по времени : %f\n", A, B, T);
 	fprintf(out, "Начальное смещение х0 : %f\nКоэффициент альфа : %f\nШаг интегрирования по t, по x : %f, %f\n", x0, alpha, dt, dx);
-	fprintf(out, "Отношение токов : %f\nИнтенсивность флуктуаций : %f\nУсреднение : %d\nV : %f\n", I, d, Naver, V);
-	fprintf(out, "Время работы вычисления вероятности: crnf - %d, crnp - %d", worktime1, worktime2);
+	fprintf(out, "Скорость изменения токов : %f\nИнтенсивность флуктуаций : %f\nУсреднение : %d\nV : %f\n", I, d, Naver, V);
+	fprintf(out, "Время работы вычисления вероятности: crn - %d", worktime1);
 	fclose(out);
 #pragma endregion
 	return 0;
